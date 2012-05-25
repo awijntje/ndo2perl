@@ -367,7 +367,8 @@ sub dbconnect () {
 	# here we handle setting up a DB connection and handle.
         $dbconfig = Config::File::read_config_file($config);
 	if ($dbconfig->{driver} eq "mysql") {
-        	$dsn = "dbi:$dbconfig->{driver}:$dbconfig->{database}:$dbconfig->{db_host}";
+        	$dsn = "dbi:$dbconfig->{driver}:$dbconfig->{database}:$dbconfig->{db_host};mysql_server_prepare=1";
+        	#$dsn = "dbi:$dbconfig->{driver}:$dbconfig->{database}:$dbconfig->{db_host}";
         	$dbh =  DBI->connect($dsn, $dbconfig->{db_user}, $dbconfig->{db_password}, { AutoCommit => 1}) or die "Can't connect to DB: $DBI::errstr";
 	} elsif ($dbconfig->{driver} eq "Pg") {
 		$dsn = "dbi:$dbconfig->{driver}:dbname=$dbconfig->{database}i;host=$dbconfig->{db_host}";
@@ -899,13 +900,13 @@ sub prepare_statements () {
 	my $eventhandler_start_query = "INSERT INTO nagios_eventhandlers (instance_id,eventhandler_type,object_id,state,state_type,start_time,start_time_usec,
 		end_time,end_time_usec,command_object_id,command_args,command_line,timeout,early_timeout,execution_time,return_code,output) VALUES
 		(?,FROM_UNIXTIME(?),?,FROM_UNIXTIME(?),?,?,?,?,?,?,?,?,?,?,FROM_UNIXTIME(?),?,?) ON DUPLICATE KEY UPDATE instance_id=?,
-		start_time=FROM_UNIXTIME(?),start_time-usec=?,end_time=FROM_UNIXTIME(?),end_time_usec=?,command_object_id=?,command_args=?,
+		start_time=FROM_UNIXTIME(?),start_time_usec=?,end_time=FROM_UNIXTIME(?),end_time_usec=?,command_object_id=?,command_args=?,
 		command_line=?,timeout=?,early_timeout=?,execution_time=FROM_UNIXTIME(?),return_code=?,output=?";
 	$eventhandler_start_sth = $dbh->prepare($eventhandler_start_query);
 	my $eventhandler_end_query = "INSERT INTO nagios_eventhandlers (instance_id,eventhandler_type,object_id,state,state_type,start_time,start_time_usec,
 		end_time,end_time_usec,command_object_id,command_args,command_line,timeout,early_timeout,execution_time,return_code,output) VALUES
 		(?,FROM_UNIXTIME(?),?,FROM_UNIXTIME(?),?,?,?,?,?,?,?,?,?,?,FROM_UNIXTIME(?),?,?) ON DUPLICATE KEY UPDATE instance_id=?,
-		start_time=FROM_UNIXTIME(?),start_time-usec=?,end_time=FROM_UNIXTIME(?),end_time_usec=?,command_object_id=?,command_args=?,
+		start_time=FROM_UNIXTIME(?),start_time_usec=?,end_time=FROM_UNIXTIME(?),end_time_usec=?,command_object_id=?,command_args=?,
 		command_line=?,timeout=?,early_timeout=?,execution_time=FROM_UNIXTIME(?),return_code=?,output=?";
 	$eventhandler_end_sth = $dbh->prepare($eventhandler_end_query);
 	my $externalcommand_start_query = "INSERT INTO nagios_externalcommands (instance_id,entry_time,command_type,command_name,command_args) VALUES
