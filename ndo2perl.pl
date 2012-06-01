@@ -49,7 +49,7 @@ my $nthash;
 my $id;
 my $ids;
 my $dbconfig;
-my $config = "/usr/local/nagios/etc/perl2db.conf";
+my $config = "/home/alan/Opsview/perl2db/perl2db.conf";
 my $dsn;
 my $conn;
 my $dbh;
@@ -2418,14 +2418,14 @@ sub not_implemented () {
 sub unknown_event_type () {
 	$nthash = shift;
 	my $event_type = $nthash->{1};
-	open(LOG,">/usr/local/nagios/var/perl2db/$event_type.log") or die "Can't create logfile: $!\n";
+	open(LOG,">/home/alan/Opsview/perl2db/var/$event_type.log") or die "Can't create logfile: $!\n";
 	print LOG Dumper (\$nthash);
 	#print "Unknown event: $event_type logged for further analyses\n";
 	close LOG;
-	if (-e "/usr/local/nagios/var/perl2db/$file") {
+	if (-e "/home/alan/Opsview/perl2db/var/$file") {
 		# already saved a copy.
 	} else {
-		my $newfile = "/usr/local/nagios/var/perl2db/$file";
+		my $newfile = "/home/alan/Opsview/perl2db/var/$file";
 		copy($file,$newfile) or die "Can't copy file: $!\n";
 	}
 	return;
@@ -2435,14 +2435,14 @@ sub unknown_ndo_id () {
         $nthash = shift;
         my $ndo_id = $nthash->{'ndo_id'};
 	$ndo_id =~ s/\://;
-        open(LOG,">/usr/local/nagios/var/perl2db/$ndo_id.log") or die "Can't create logfile: $!\n";
+        open(LOG,">/home/alan/Opsview/perl2db/var/$ndo_id.log") or die "Can't create logfile: $!\n";
         print LOG Dumper (\$nthash);
         #print "Unknown ndo_id: $ndo_id logged for further analyses\n";
         close LOG;
-        if (-e "//usr/local/nagios/var/perl2db/$file") {
+        if (-e "/home/alan/Opsview/perl2db/var/$file") {
                 # already saved a copy.
         } else {
-                my $newfile = "/usr/local/nagios/var/perl2db/$file";
+                my $newfile = "/home/alan/Opsview/perl2db/var/$file";
                 copy($file,$newfile) or die "Can't copy file: $!\n";
         }
         return;
