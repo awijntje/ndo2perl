@@ -1,0 +1,210 @@
+#!/usr/bin/perl
+#
+#
+# SYNTAX:
+#	import_ndologsd
+#
+# DESCRIPTION:
+#	Imports NDO logs into database
+#	Allows Nagios to continue processing while this is asynchronously working
+#	Will import files from the var/ndologs directory
+#	in filename order (which should be timestamped)
+#
+# AUTHORS:
+#	Copyright (C) 2003-2012 Opsview Limited. All rights reserved
+#
+#    This file is part of Opsview
+#
+#    Opsview is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    Opsview is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with Opsview; if not, write to the Free Software
+#    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+#
+
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use lib $Bin, "$Bin/../lib", "$Bin/../etc", "$Bin/../perl/lib";
+use Log::Log4perl;
+use POSIX;
+use File::Copy;
+use Time::HiRes qw(sleep gettimeofday);
+#use Opsview::Utils::NDOLogsImporter;
+
+$0 = "import_ndologsd";
+
+my $rootdir    = "/usr/local/nagios";
+my $import_dir = "$rootdir/var/ndologs";
+my $ndo2perl   = "$rootdir/bin/ndo2perl.pl";
+
+Log::Log4perl::init_and_watch( "$rootdir/etc/Log4perl.conf", 30 );
+
+my $logger = Log::Log4perl->get_logger("import_ndologsd_ndo2perl");
+
+$logger->info("Starting");
+
+my $pidfile = "/usr/local/nagios/var/import_ndologsd.pid";
+if ( -e $pidfile ) {
+    open( my $fh, "< $pidfile" ) or $logger->logdie("Cannot read pid file - is daemon running?");
+    my $pid = <$fh>;
+    close $fh;
+    if ( kill 0, $pid ) {
+        $logger->logdie("import_ndologsd already running as process $pid");
+    }
+    else {
+        $logger->warn("Crash from previous run. Deleting pid file");
+        unlink $pidfile or $logger->logdie("Cannot delete pidfile");
+    }
+}
+
+#my $rc = system( $ndo2perl.pl );
+#if ( $rc != 0 ) {
+#    $logger->logdie("Cannot startup perl2db");
+#}
+#$logger->info("perl2db started");
+#$SIG{__DIE__} = \&cleanup;
+
+my $pid = fork;
+exit if $pid;
+$logger->logdie("Couldn't fork: $!") unless defined $pid;
+POSIX::setsid() or $logger->logdie("Cannot daemonize");
+
+$logger->info("Daemonised");
+
+open PID, "> $pidfile" or die "Could not write to pid file $pidfile";
+print PID "$$";
+close PID;
+
+for my $handle ( *STDIN, *STDOUT, *STDERR ) {
+    open( $handle, "+<", "/dev/null" ) || die "can't reopen $handle to /dev/null: $!";
+}
+
+# Two ways of doing this: open a pipe (but I think it gets slower over time...)
+# or invoke file2sock each time
+# Invoking causes a connect/disconnect message in syslog each time
+# Neither seem ideal and probably cause more problems
+# Create pipe
+#open(FILE2SOCK, "|-", $file2sock, "-s", "-", "-d", $ndo_socket, "-t", "unix") or $logger->logdie("Could not setup file2sock");
+
+my $break = 0;
+$SIG{PIPE} = sub { $logger->logdie("file2sock died?") };
+$SIG{INT}  = \&catch_signals;
+$SIG{TERM} = \&catch_signals;
+
+#my $importer = Opsview::Utils::NDOLogsImporter->new( { logger => $logger, break => \$break } );
+
+chdir($import_dir) or $logger->logdie("Cannot chdir: $!");
+my $last_update = 0;
+my $c           = 0;
+MAINLOOP:
+until ($break) {
+
+    # Not sure why, but can't use IMPORT_DIR filehandle
+    my $dir_update = ( stat(".") )[9];
+    my $found      = 0;
+    if ( $dir_update != $last_update ) {
+        opendir( IMPORT_DIR, "." ) or $logger->logdie("Cannot open dir: $!");
+        my @files = sort ( grep !/^\.\.?\z/, readdir IMPORT_DIR );
+        closedir IMPORT_DIR;
+        foreach my $file (@files) {
+            last MAINLOOP if ($break);
+            my $start = gettimeofday();
+
+            # Send the log to Perl2DB. Blocks if connection refuses until either it can, or $break is set
+            #$importer->send_log($file);
+		my $output;
+	    open (FH,"/usr/bin/perl $ndo2perl $file 2>&1 |") or die "Can't open filehandle: $!\n";
+	    while (<FH>) {
+        	chomp($output = $_);
+		$logger->debug("$output");
+	    };
+	    my $file_size = -s $file;
+	    close FH;
+
+
+            if ( $logger->is_debug() ) {
+                my $debug_dir = "/usr/local/nagios/var/ndologs.archive";
+                unless ( -d $debug_dir ) {
+                    mkdir $debug_dir;
+                }
+                rename( $file, "$debug_dir/$file" );
+            }
+            else {
+                unlink $file;
+            }
+            last MAINLOOP if ($break);
+            my $duration = gettimeofday() - $start;
+            $logger->debug("Finished $file. Duration=$duration");
+            if ( $duration > 1 ) {
+                #my $file_size = $importer->last_file_size;
+                my $nice_duration = sprintf( "%0.2f", $duration );
+                #$logger->warn("Import of $file, size=$file_size, took $nice_duration seconds > 1 seconds");
+		$logger->warn("$output");
+            }
+            $found = 1;
+        }
+        $last_update = $dir_update;
+    }
+
+    # Directory would have changed from our last import, so expect above if to succeed
+    # But allows a next check to run if more files have been added
+    sleep 0.25 unless $found;
+}
+
+cleanup();
+
+sub cleanup {
+    return if ( $^S == 1 );
+
+    # This appears to be called twice if a forced death occurs. Not sure why
+    #close FILE2SOCK;
+    $logger->info("Stopping ndo2perl");
+    my @ndo2perl_pids = qx/pgrep -u nagios ndo2perl.pl/;
+    if (@ndo2perl_pids) {
+
+        # These should be defined with 'Readonly' module in Opsview 3
+        my $SIGEXISTS = 0;
+        my $SIGKILL   = 9;
+        my $SIGTERM   = 15;
+
+        kill( $SIGTERM, @ndo2perl_pids );
+
+        # set timeout to less than 30 else we may trigger parent kill routines
+        my $timeout   = 20;
+        my $countdown = $timeout;
+        while (1) {
+            if ( !kill( $SIGEXISTS, @ndo2perl_pids ) ) {
+                last;
+            }
+            $logger->info( 'Checking if ndo2perl has stopped', ' (', $countdown, ' seconds to go)' );
+            sleep 1;
+            if ( $countdown le 1 ) {
+                $logger->warn( 'Failed to stop ndo2perl within ', $timeout, ' seconds - sending kill signal', );
+                kill( $SIGKILL, @ndo2perl_pids );
+                last;
+            }
+
+            $countdown--;
+        }
+    }
+    $logger->info("Stopping $0");
+    unlink $pidfile;
+}
+
+sub catch_signals {
+    if ( $break++ == 0 ) {
+        $logger->warn("Received kill signal - gracefully shutting down");
+    }
+    else {
+        $logger->logdie("Received kill signal - forced death");
+    }
+}
